@@ -109,6 +109,7 @@ Minimum practical permissions:
 - `ec2:RebootInstances`
 
 Example policy is included in `iam-policy-example.json`.
+For full step-by-step IAM role and instance profile setup, see `IAM_SETUP.md`.
 
 Notes:
 
