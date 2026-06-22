@@ -4,8 +4,6 @@ This document explains how to create and attach the IAM permissions required by 
 
 The watchdog runs on a separate EC2 instance and monitors the AWS EC2 status of a target instance. If the target instance's EC2 **instance status check** remains impaired for long enough, the watchdog can reboot the target instance.
 
-The watchdog does **not** monitor the Pixop application directly. It does not call `/health`, inspect `pixop-live`, use SSH, or check `systemd` service state.
-
 ## Recovery Model
 
 The intended recovery model is two-layered:
@@ -422,20 +420,6 @@ Reboot only if:
 
 The watchdog should not reboot for a single failed check.
 
-## What the External Watchdog Should Not Do
-
-The external watchdog should not:
-
-* call `/health`
-* inspect `pixop-live`
-* use SSH
-* check `systemctl status pixop-live`
-* check application logs
-* check process state
-* infer anything from whether the Pixop application is running
-
-Application-level recovery is handled by the local watchdog on the target instance.
-
 ## What This Setup Detects
 
 This setup is intended to detect and respond to:
@@ -450,20 +434,6 @@ Typical response:
 InstanceStatus.Status == impaired for 5 minutes
     -> reboot target EC2 instance
 ```
-
-## What This Setup Does Not Detect
-
-This setup intentionally does not detect or respond to:
-
-* `pixop-live` application deadlocks
-* `/health` endpoint failure
-* GPU pipeline stalls while EC2 status remains OK
-* bad output quality
-* application-level maintenance
-* deliberate service disablement
-* degraded-but-not-dead performance
-
-Those are outside the scope of the external EC2 watchdog.
 
 ## Cleanup
 
@@ -514,5 +484,4 @@ Before enabling automatic reboots, verify:
 * [ ] `reboot-instances --dry-run` returns `DryRunOperation`.
 * [ ] The watchdog has a conservative impairment threshold.
 * [ ] The watchdog has a reboot cooldown.
-* [ ] The watchdog does not inspect application health.
 * [ ] The local Pixop watchdog handles application-level recovery.

@@ -11,13 +11,13 @@
       "Resource": "*"
     },
     {
-      "Sid": "RebootTargetInstance",
+      "Sid": "AllowRebootOfWatchdogTaggedInstancesOnly",
       "Effect": "Allow",
       "Action": "ec2:RebootInstances",
-      "Resource": "*",
+      "Resource": "arn:aws:ec2:eu-west-1:123456789012:instance/*",
       "Condition": {
         "StringEquals": {
-          "ec2:ResourceTag/Role": "pixop-target"
+          "ec2:ResourceTag/PixopExternalWatchdogTarget": "true"
         }
       }
     }
