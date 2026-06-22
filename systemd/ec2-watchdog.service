@@ -1,0 +1,21 @@
+[Unit]
+Description=External EC2 instance watchdog
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ec2-watchdog
+Group=ec2-watchdog
+WorkingDirectory=/opt/ec2-watchdog
+EnvironmentFile=/etc/ec2-watchdog/ec2-watchdog.env
+ExecStart=/opt/ec2-watchdog/.venv/bin/python -m ec2_watchdog.watchdog
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

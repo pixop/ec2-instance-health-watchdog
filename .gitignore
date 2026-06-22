@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local environment file (keep .env.example tracked)
+.env
