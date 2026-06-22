@@ -22,6 +22,7 @@ LOGGER = logging.getLogger("ec2_watchdog")
 
 RUNNING_STATE = "running"
 IMPAIRED_STATUS = "impaired"
+MIN_PYTHON_VERSION = (3, 10)
 
 
 class ConfigError(ValueError):
@@ -366,6 +367,14 @@ def main_loop(ec2_client, config: Config) -> None:
 
 
 def main() -> int:
+    if sys.version_info < MIN_PYTHON_VERSION:
+        print(
+            "Python 3.10+ is required. "
+            f"Current version: {sys.version_info.major}.{sys.version_info.minor}",
+            file=sys.stderr,
+        )
+        return 1
+
     try:
         config = load_config()
         configure_logging(config.log_level)

@@ -118,10 +118,12 @@ Notes:
 
 ## Install and Run
 
+Python requirement: **Python 3.10+**.
+
 ### 1) Install dependencies
 
 ```bash
-python3 -m venv .venv
+python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -141,7 +143,7 @@ export REBOOT_ON_SYSTEM_STATUS_IMPAIRED=false
 ### 3) Run manually
 
 ```bash
-python -m ec2_watchdog.watchdog
+python3 -m ec2_watchdog.watchdog
 ```
 
 If startup dry-run permission check fails, fix IAM before running as a service.
@@ -154,6 +156,7 @@ The provided unit file is `systemd/ec2-watchdog.service`.
 
 Use the installer script (run as root). It handles:
 
+- selecting a Python 3.10+ interpreter
 - creating service user/group
 - copying project to `/opt/ec2-watchdog`
 - setting ownership so virtualenv creation works
@@ -173,7 +176,7 @@ sudo useradd --system --no-create-home --shell /usr/sbin/nologin ec2-watchdog ||
 sudo mkdir -p /opt/ec2-watchdog /etc/ec2-watchdog
 sudo cp -r . /opt/ec2-watchdog
 sudo chown -R ec2-watchdog:ec2-watchdog /opt/ec2-watchdog
-sudo -u ec2-watchdog python3 -m venv /opt/ec2-watchdog/.venv
+sudo -u ec2-watchdog python3.10 -m venv /opt/ec2-watchdog/.venv
 sudo -u ec2-watchdog /opt/ec2-watchdog/.venv/bin/pip install -r /opt/ec2-watchdog/requirements.txt
 ```
 
@@ -211,9 +214,12 @@ Fix with:
 
 ```bash
 sudo chown -R ec2-watchdog:ec2-watchdog /opt/ec2-watchdog
-sudo -u ec2-watchdog python3 -m venv /opt/ec2-watchdog/.venv
+sudo -u ec2-watchdog python3.10 -m venv /opt/ec2-watchdog/.venv
 sudo -u ec2-watchdog /opt/ec2-watchdog/.venv/bin/pip install -r /opt/ec2-watchdog/requirements.txt
 ```
+
+If you see a boto3 warning about Python 3.9 deprecation, recreate the virtualenv
+with Python 3.10+.
 
 ## Operational Limitations
 

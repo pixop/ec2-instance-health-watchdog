@@ -20,13 +20,24 @@ if [[ "$EUID" -ne 0 ]]; then
   exit 1
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "python3 is required but not installed." >&2
+pick_python_3_10_plus() {
+  local candidate
+  for candidate in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! PYTHON_BIN="$(pick_python_3_10_plus)"; then
+  echo "Python 3.10+ is required. Install python3.10 or newer and rerun." >&2
   exit 1
 fi
 
-if ! python3 -c "import venv" >/dev/null 2>&1; then
-  echo "python3 venv module is missing. Install python3-venv first." >&2
+if ! "$PYTHON_BIN" -c "import venv" >/dev/null 2>&1; then
+  echo "Python venv module is missing for $PYTHON_BIN. Install python3-venv first." >&2
   exit 1
 fi
 
@@ -86,7 +97,11 @@ run_as_app_user() {
 }
 
 if [[ ! -d "$APP_DIR/.venv" ]]; then
-  run_as_app_user python3 -m venv "$APP_DIR/.venv"
+  run_as_app_user "$PYTHON_BIN" -m venv "$APP_DIR/.venv"
+elif ! run_as_app_user "$APP_DIR/.venv/bin/python" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "Existing virtualenv uses Python <3.10, recreating it..."
+  rm -rf "$APP_DIR/.venv"
+  run_as_app_user "$PYTHON_BIN" -m venv "$APP_DIR/.venv"
 fi
 
 run_as_app_user "$APP_DIR/.venv/bin/pip" install --upgrade pip
