@@ -1,217 +1,102 @@
 # EC2 Health Watchdog (External)
 
-Simple, production-minded Python watchdog that runs on a **separate EC2 instance** and monitors a target EC2 instance using AWS EC2 health/status signals only.
+External EC2 watchdog that runs on a separate instance and uses only AWS EC2
+status signals to decide when to reboot a target instance.
 
-It is intentionally scoped to EC2/OS-level recovery and does **not** inspect the Pixop application.
+Python requirement: **3.10+**.
 
-## Scope and Intent
+## What It Does
 
-This watchdog:
-
-- polls `describe_instance_status` for one target instance
-- reads:
-  - `InstanceState.Name`
-  - `SystemStatus.Status`
-  - `InstanceStatus.Status`
-- reboots only when instance-level impairment persists long enough and cooldown allows it
+- polls `DescribeInstanceStatus` for one target instance
+- reads `InstanceState.Name`, `InstanceStatus.Status`, `SystemStatus.Status`
+- reboots only after **continuous** `InstanceStatus=impaired` for a threshold
+- enforces reboot cooldown to avoid reboot loops
+- performs startup self-test (`DescribeInstances` + reboot dry-run permission)
 - keeps running through transient AWS API errors
-- logs every decision path clearly
 
-This watchdog intentionally does **not**:
+## What It Does Not Do
 
-- call the app API
-- call `/health`
-- inspect `systemctl`
-- check whether `pixop-live` is running
-- SSH into the target instance
+- does not call `/health`
+- does not check `pixop-live`, `systemctl`, logs, process state, or SSH
+- does not infer application health from runtime behavior
 
-## Two-Layer Recovery Model
-
-Layer 1: local watchdog on target EC2  
-handles `pixop-live` application failures and restarts the app
-
-Layer 2: external EC2 watchdog (this project)  
-handles EC2 instance/OS-level impairment and can reboot the instance
-
-## Project Layout
-
-```text
-ec2_watchdog/
-    watchdog.py
-requirements.txt
-README.md
-iam-policy-example.json
-scripts/
-    install-systemd.sh
-systemd/
-    ec2-watchdog.service
-```
+This watchdog is Layer 2 only (EC2/OS recovery). Layer 1 app recovery should be
+handled by a local watchdog on the target host.
 
 ## Configuration
-
-Environment variables:
 
 Required:
 
 - `AWS_REGION`
 - `TARGET_INSTANCE_ID`
 
-Optional:
+Optional defaults:
 
-- `CHECK_INTERVAL_SECONDS` (default: `30`)
-- `IMPAIRED_THRESHOLD_SECONDS` (default: `300`)
-- `REBOOT_COOLDOWN_SECONDS` (default: `1800`)
-- `LOG_LEVEL` (default: `INFO`)
-- `REBOOT_ON_SYSTEM_STATUS_IMPAIRED` (default: `false`)
+- `CHECK_INTERVAL_SECONDS=30`
+- `IMPAIRED_THRESHOLD_SECONDS=300`
+- `REBOOT_COOLDOWN_SECONDS=1800`
+- `LOG_LEVEL=INFO`
+- `REBOOT_ON_SYSTEM_STATUS_IMPAIRED=false`
 
-## Reboot Decision Rules
+Reboot condition (default behavior):
 
-Default reboot trigger:
+1. instance state is `running`
+2. `InstanceStatus.Status == impaired`
+3. impairment duration >= `IMPAIRED_THRESHOLD_SECONDS`
+4. cooldown expired
 
-1. target `InstanceState.Name == "running"`
-2. `InstanceStatus.Status == "impaired"`
-3. impairment has persisted continuously for at least `IMPAIRED_THRESHOLD_SECONDS`
-4. cooldown `REBOOT_COOLDOWN_SECONDS` has expired
+`SystemStatus=impaired` is logged; reboot on system impairment is optional and
+disabled by default.
 
-Additional behavior:
+## Local Run
 
-- non-running states (`pending`, `stopping`, `stopped`, `shutting-down`, `terminated`) never trigger reboot
-- impairment timers reset when state is not `running`
-- `SystemStatus.Status == "impaired"` is logged clearly
-- by default, system-status impairment does not trigger reboot (`REBOOT_ON_SYSTEM_STATUS_IMPAIRED=false`)
-- if `REBOOT_ON_SYSTEM_STATUS_IMPAIRED=true`, persistent system-status impairment can also trigger reboot using the same threshold/cooldown guardrails
-
-Monotonic time (`time.monotonic()`) is used for threshold/cooldown calculations.
-
-## Startup Self-Test
-
-On startup, the watchdog validates:
-
-1. target instance can be described (`DescribeInstances`)
-2. reboot permission with dry-run:
-
-```python
-ec2.reboot_instances(InstanceIds=[target_instance_id], DryRun=True)
+```bash
+cp .env.example .env
+./run-local.sh
 ```
 
-Interpretation:
-
-- `DryRunOperation`: permissions are valid
-- `UnauthorizedOperation` (or auth failure): permission missing, process exits
-- any other error: process exits with clear log
-
-## IAM Permissions
-
-Minimum practical permissions:
-
-- `ec2:DescribeInstances`
-- `ec2:DescribeInstanceStatus`
-- `ec2:RebootInstances`
-
-Example policy is included in `iam-policy-example.json`.
-For full step-by-step IAM role and instance profile setup, see `IAM_SETUP.md`.
-
-Notes:
-
-- EC2 `Describe*` actions generally require `"Resource": "*"`
-- restrict reboot permissions as much as practical (region/account/tags/instance targeting)
-- depending on your policy model and AWS condition support, tag-based controls can be used to limit reboots
-
-## Install and Run
-
-Python requirement: **Python 3.10+**.
-
-### 1) Install dependencies
+Or run manually:
 
 ```bash
 python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 2) Export environment variables
-
-```bash
-export AWS_REGION=eu-central-1
-export TARGET_INSTANCE_ID=i-0123456789abcdef0
-export CHECK_INTERVAL_SECONDS=30
-export IMPAIRED_THRESHOLD_SECONDS=300
-export REBOOT_COOLDOWN_SECONDS=1800
-export LOG_LEVEL=INFO
-export REBOOT_ON_SYSTEM_STATUS_IMPAIRED=false
-```
-
-### 3) Run manually
-
-```bash
+source .env
 python3 -m ec2_watchdog.watchdog
 ```
 
-If startup dry-run permission check fails, fix IAM before running as a service.
+## IAM
 
-## systemd Service Installation (Example)
+Minimum actions:
 
-The provided unit file is `systemd/ec2-watchdog.service`.
+- `ec2:DescribeInstances`
+- `ec2:DescribeInstanceStatus`
+- `ec2:RebootInstances`
 
-### Recommended (automated installer)
+- Example policy: `iam-policy-example.json`
+- Full IAM setup guide: `IAM_SETUP.md`
 
-Use the installer script (run as root). It handles:
+## systemd (Recommended)
 
-- selecting a Python 3.10+ interpreter
-- creating service user/group
-- copying project to `/opt/ec2-watchdog`
-- setting ownership so virtualenv creation works
-- creating `/etc/ec2-watchdog/ec2-watchdog.env` from `.env.example` if missing
-- installing dependencies into `/opt/ec2-watchdog/.venv`
-- installing and starting the systemd unit
+Use the installer:
 
 ```bash
-chmod +x scripts/install-systemd.sh
 sudo ./scripts/install-systemd.sh
 ```
 
-### Manual installation
+This installs to `/opt/ec2-watchdog`, creates `/etc/ec2-watchdog/ec2-watchdog.env`
+if needed, creates the venv with Python 3.10+, and enables
+`ec2-watchdog.service`.
+
+Useful commands:
 
 ```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin ec2-watchdog || true
-sudo mkdir -p /opt/ec2-watchdog /etc/ec2-watchdog
-sudo cp -r . /opt/ec2-watchdog
-sudo chown -R ec2-watchdog:ec2-watchdog /opt/ec2-watchdog
-sudo -u ec2-watchdog python3.10 -m venv /opt/ec2-watchdog/.venv
-sudo -u ec2-watchdog /opt/ec2-watchdog/.venv/bin/pip install -r /opt/ec2-watchdog/requirements.txt
+sudo systemctl status ec2-watchdog
+sudo journalctl -u ec2-watchdog -f
 ```
 
-Create `/etc/ec2-watchdog/ec2-watchdog.env`:
-
-```bash
-AWS_REGION=eu-central-1
-TARGET_INSTANCE_ID=i-0123456789abcdef0
-CHECK_INTERVAL_SECONDS=30
-IMPAIRED_THRESHOLD_SECONDS=300
-REBOOT_COOLDOWN_SECONDS=1800
-LOG_LEVEL=INFO
-REBOOT_ON_SYSTEM_STATUS_IMPAIRED=false
-```
-
-Install and start service:
-
-```bash
-sudo cp systemd/ec2-watchdog.service /etc/systemd/system/ec2-watchdog.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now ec2-watchdog.service
-sudo systemctl status ec2-watchdog.service
-```
-
-### Common setup errors
-
-If you see:
-
-- `Permission denied: '/opt/ec2-watchdog/.venv'`
-- `.venv/bin/activate: No such file or directory`
-- `pip: command not found`
-
-Then `/opt/ec2-watchdog` ownership is incorrect or the venv was never created.
-Fix with:
+If you hit venv permission errors, fix ownership and recreate venv as the
+service user:
 
 ```bash
 sudo chown -R ec2-watchdog:ec2-watchdog /opt/ec2-watchdog
@@ -219,28 +104,15 @@ sudo -u ec2-watchdog python3.10 -m venv /opt/ec2-watchdog/.venv
 sudo -u ec2-watchdog /opt/ec2-watchdog/.venv/bin/pip install -r /opt/ec2-watchdog/requirements.txt
 ```
 
-If you see a boto3 warning about Python 3.9 deprecation, recreate the virtualenv
-with Python 3.10+.
+## Limits
 
-## Operational Limitations
-
-This external watchdog can detect/respond to:
+Detects/responds to:
 
 - EC2 instance status check impairment
-- likely guest OS or instance-level problems surfaced by AWS status checks
-- persistent impaired instance status beyond configured threshold
+- persistent guest/instance-level problems surfaced by AWS checks
 
-This external watchdog does **not** detect/respond to:
+Does not detect/respond to:
 
-- `pixop-live` deadlocks
-- `/health` endpoint failure
-- GPU pipeline stalls while EC2 status remains OK
-- bad output quality
-- application-level maintenance or intentional disablement
-- degraded-but-not-dead performance
+- app deadlocks, `/health` failures, or service-level quality/performance issues
 
-Those are intentionally out of scope for this external watchdog and should be handled by:
-
-- local watchdog on target instance
-- application metrics/alerts
-- other service-level observability and response tooling
+Use local watchdog + app observability for those.
