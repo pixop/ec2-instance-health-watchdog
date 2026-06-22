@@ -41,6 +41,8 @@ ec2_watchdog/
 requirements.txt
 README.md
 iam-policy-example.json
+scripts/
+    install-systemd.sh
 systemd/
     ec2-watchdog.service
 ```
@@ -148,16 +150,31 @@ If startup dry-run permission check fails, fix IAM before running as a service.
 
 The provided unit file is `systemd/ec2-watchdog.service`.
 
-Suggested installation:
+### Recommended (automated installer)
+
+Use the installer script (run as root). It handles:
+
+- creating service user/group
+- copying project to `/opt/ec2-watchdog`
+- setting ownership so virtualenv creation works
+- creating `/etc/ec2-watchdog/ec2-watchdog.env` from `.env.example` if missing
+- installing dependencies into `/opt/ec2-watchdog/.venv`
+- installing and starting the systemd unit
 
 ```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin ec2-watchdog
+chmod +x scripts/install-systemd.sh
+sudo ./scripts/install-systemd.sh
+```
+
+### Manual installation
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin ec2-watchdog || true
 sudo mkdir -p /opt/ec2-watchdog /etc/ec2-watchdog
 sudo cp -r . /opt/ec2-watchdog
-cd /opt/ec2-watchdog
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+sudo chown -R ec2-watchdog:ec2-watchdog /opt/ec2-watchdog
+sudo -u ec2-watchdog python3 -m venv /opt/ec2-watchdog/.venv
+sudo -u ec2-watchdog /opt/ec2-watchdog/.venv/bin/pip install -r /opt/ec2-watchdog/requirements.txt
 ```
 
 Create `/etc/ec2-watchdog/ec2-watchdog.env`:
@@ -179,6 +196,23 @@ sudo cp systemd/ec2-watchdog.service /etc/systemd/system/ec2-watchdog.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now ec2-watchdog.service
 sudo systemctl status ec2-watchdog.service
+```
+
+### Common setup errors
+
+If you see:
+
+- `Permission denied: '/opt/ec2-watchdog/.venv'`
+- `.venv/bin/activate: No such file or directory`
+- `pip: command not found`
+
+Then `/opt/ec2-watchdog` ownership is incorrect or the venv was never created.
+Fix with:
+
+```bash
+sudo chown -R ec2-watchdog:ec2-watchdog /opt/ec2-watchdog
+sudo -u ec2-watchdog python3 -m venv /opt/ec2-watchdog/.venv
+sudo -u ec2-watchdog /opt/ec2-watchdog/.venv/bin/pip install -r /opt/ec2-watchdog/requirements.txt
 ```
 
 ## Operational Limitations
